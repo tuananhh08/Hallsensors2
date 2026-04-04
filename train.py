@@ -332,7 +332,7 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fcn  import FCN
+from InvProb.model  import FCN
 from loss import HuberPoseLoss
 
 
@@ -342,7 +342,7 @@ from loss import HuberPoseLoss
 
 def get_config():
     p = argparse.ArgumentParser()
-    p.add_argument("--voltage",      type=str,   default="Grid_voltage_no_calib.csv")
+    p.add_argument("--voltage",      type=str,   default="grid_calib_data.csv")
     p.add_argument("--label",        type=str,   default="Grid_points_coordinates.csv")
     p.add_argument("--ckpt_dir",     type=str,   default="./ckpt")
     p.add_argument("--val_ratio",    type=float, default=0.2,
@@ -473,7 +473,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print("\n" + "=" * 65)
-    print("  ResCBAM-FCN — Pose Estimation Training")
+    print("  Model Training")
     print("=" * 65)
     gpu_name = torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU"
     print(f"  Device      : {device} ({gpu_name})")

@@ -16,7 +16,7 @@ args = parser.parse_args()
 
 # ─── Import model ─────────────────────────────────────────────────────────────
 sys.path.insert(0, args.code_dir)
-from fcn import FCN  # noqa: E402
+from InvProb.model import Model  # noqa: E402
 
 # ─── Load data ────────────────────────────────────────────────────────────────
 def _read(path):
@@ -57,7 +57,7 @@ volt_tensor = torch.tensor(volt_scaled, dtype=torch.float32).view(-1, 1, 8, 8)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
 
-model = FCN(out_dim=5).to(device)
+model = Model(out_dim=5).to(device)
 
 # torch.compile chi tren Linux (Colab), bo qua tren Windows
 if platform.system() != "Windows":
