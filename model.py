@@ -5,7 +5,7 @@ from convnext_block import ConvNeXtBlock
 
 
 class Model(nn.Module):
-    def __init__(self, out_dim: int = 5, drop_path_rate: float = 0.07):
+    def __init__(self, out_dim: int = 5, drop_path_rate: float = 0.065):
         super().__init__()
 
         # Stage 1: 8x8x8
@@ -44,7 +44,6 @@ class Model(nn.Module):
             nn.Linear(64, 128, bias=False),
             nn.BatchNorm1d(128),
             nn.LeakyReLU(0.01, inplace=True),
-            nn.Dropout(p=0.08),
             nn.Linear(128, 64, bias=False),
             nn.BatchNorm1d(64),
             nn.LeakyReLU(0.01, inplace=True),

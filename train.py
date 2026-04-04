@@ -7,9 +7,8 @@
 # from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 # sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-# from fcn  import FCN
+# from model import Model
 # from loss import HuberPoseLoss
-
 
 # # =============================================================================
 # # CONFIG
@@ -17,21 +16,21 @@
 
 # def get_config():
 #     p = argparse.ArgumentParser()
-#     p.add_argument("--voltage",      type=str,   default="Grid_voltage.csv")
+#     p.add_argument("--voltage",      type=str,   default="grid_calib_data.csv")
 #     p.add_argument("--label",        type=str,   default="Grid_points_coordinates.csv")
 #     p.add_argument("--ckpt_dir",     type=str,   default="./ckpt")
 #     p.add_argument("--val_ratio",    type=float, default=0.2,
 #                    help="Ti le validation (default=0.2 tuc 80/20)")
 #     p.add_argument("--batch_size",   type=int,   default=64)
 #     p.add_argument("--num_epochs",   type=int,   default=200)
-#     p.add_argument("--lr",           type=float, default=3e-4)
-#     p.add_argument("--weight_decay", type=float, default=3.5e-3)
+#     p.add_argument("--lr",           type=float, default=0.0097)
+#     p.add_argument("--weight_decay", type=float, default=0.0032)
 #     p.add_argument("--ang_weight",   type=float, default=1.0)
-#     p.add_argument("--delta_xyz",    type=float, default=0.14)
-#     p.add_argument("--delta_ang",    type=float, default=0.14)
+#     p.add_argument("--delta_xyz",    type=float, default=0.055)
+#     p.add_argument("--delta_ang",    type=float, default=0.16)
 #     p.add_argument("--warmup_epochs",type=int,   default=5)
 #     p.add_argument("--save_every",   type=int,   default=5)
-#     p.add_argument("--patience",     type=int,   default=60)
+#     p.add_argument("--patience",     type=int,   default=40)
 #     p.add_argument("--seed",         type=int,   default=42)
 #     return p.parse_args()
 
@@ -49,8 +48,7 @@
 
 
 # def build_datasets(voltage_path, label_path, val_ratio, scaler_file, seed=42):
-#     # Load header=None truoc, kiem tra dong dau co phai so khong
-#     # -> giu nguyen toan bo 5010 dong, khong bo dong dau
+
 #     def _read(path):
 #         df = pd.read_csv(path, header=None)
 #         try:
@@ -104,9 +102,7 @@
 #     return train_ds, val_ds, n_train, n_val
 
 
-# # =============================================================================
 # # CHECKPOINT HELPERS
-# # =============================================================================
 
 # def save_checkpoint(path, epoch, model, optimizer, scheduler, val_loss, best_val):
 #     torch.save({
@@ -144,17 +140,14 @@
 #     with open(log_file, "w") as f:
 #         json.dump(log, f, indent=2)
 
-
-# # =============================================================================
 # # MAIN
-# # =============================================================================
 
 # def main():
 #     cfg    = get_config()
 #     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #     print("\n" + "=" * 65)
-#     print("  ResCBAM-FCN — Pose Estimation Training")
+#     print("  Model Training")
 #     print("=" * 65)
 #     gpu_name = torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU"
 #     print(f"  Device      : {device} ({gpu_name})")
@@ -189,7 +182,7 @@
 #                               shuffle=False, pin_memory=pin)
 
 #     # ── Model + Loss ──────────────────────────────────────────────────────────
-#     model     = FCN(out_dim=5).to(device)
+#     model     = Model(out_dim=5).to(device)
 #     criterion = HuberPoseLoss(ang_weight=cfg.ang_weight,
 #                               delta_xyz=cfg.delta_xyz,
 #                               delta_ang=cfg.delta_ang)
@@ -310,18 +303,6 @@
 # if __name__ == "__main__":
 #     main()
 
-"""
-train.py — Train ResCBAM-FCN trên 1 file duy nhất
-  voltage : Grid_voltage.csv          (N, 64)
-  label   : Grid_points_coordinates.csv (N, 5)  [x, y, z, cos_alpha, cos_beta]
-
-Usage:
-    python train.py \
-        --voltage     /path/to/Grid_voltage.csv \
-        --label       /path/to/Grid_points_coordinates.csv \
-        --ckpt_dir    /path/to/ckpt \
-        --num_epochs  200
-"""
 
 import os, sys, json, pickle, argparse, time
 import numpy as np
@@ -346,17 +327,19 @@ def get_config():
     p.add_argument("--label",        type=str,   default="Grid_points_coordinates.csv")
     p.add_argument("--ckpt_dir",     type=str,   default="./ckpt")
     p.add_argument("--val_ratio",    type=float, default=0.2,
-                   help="Ti le validation (default=0.2 tuc 80/20)")
+                   help="Ti le validation (default=0.2)")
+    p.add_argument("--test_ratio",   type=float, default=0.1,        # THÊM MỚI
+                   help="Ti le test held-out (default=0.1)")          # THÊM MỚI
     p.add_argument("--batch_size",   type=int,   default=64)
     p.add_argument("--num_epochs",   type=int,   default=200)
-    p.add_argument("--lr",           type=float, default=3.5e-4)
-    p.add_argument("--weight_decay", type=float, default=5e-3)
+    p.add_argument("--lr",           type=float, default=0.0098)
+    p.add_argument("--weight_decay", type=float, default=0.0032)
     p.add_argument("--ang_weight",   type=float, default=1.0)
-    p.add_argument("--delta_xyz",    type=float, default=0.07)
+    p.add_argument("--delta_xyz",    type=float, default=0.055)
     p.add_argument("--delta_ang",    type=float, default=0.16)
     p.add_argument("--warmup_epochs",type=int,   default=5)
     p.add_argument("--save_every",   type=int,   default=5)
-    p.add_argument("--patience",     type=int,   default=50)
+    p.add_argument("--patience",     type=int,   default=40)
     p.add_argument("--seed",         type=int,   default=42)
     return p.parse_args()
 
@@ -373,12 +356,13 @@ class PoseDataset(Dataset):
     def __getitem__(self, idx): return self.X[idx], self.Y[idx]
 
 
-def build_datasets(voltage_path, label_path, val_ratio, scaler_file, seed=42):
+def build_datasets(voltage_path, label_path, val_ratio, test_ratio,  # THÊM MỚI: test_ratio
+                   scaler_file, seed=42):
 
     def _read(path):
         df = pd.read_csv(path, header=None)
         try:
-            df.iloc[0].astype(float)   # dong dau la so -> khong co header
+            df.iloc[0].astype(float)
             has_header = False
         except (ValueError, TypeError):
             has_header = True
@@ -398,13 +382,16 @@ def build_datasets(voltage_path, label_path, val_ratio, scaler_file, seed=42):
     voltages, labels = voltages[:N], labels[:N]
     print(f"  Total samples: {N:,}")
 
-    # Split 80/20 theo seed
-    rng     = np.random.default_rng(seed)
-    idx     = rng.permutation(N)
-    n_val   = int(N * val_ratio)
-    n_train = N - n_val
-    train_idx, val_idx = idx[:n_train], idx[n_train:]
-    print(f"  Train: {n_train:,}  |  Val: {n_val:,}")
+    # THÊM MỚI: Split 70/20/10 thay vì 80/20
+    rng      = np.random.default_rng(seed)
+    idx      = rng.permutation(N)
+    n_test   = int(N * test_ratio)                                    # THÊM MỚI
+    n_val    = int(N * val_ratio)
+    n_train  = N - n_val - n_test                                     # THÊM MỚI
+    train_idx = idx[:n_train]
+    val_idx   = idx[n_train:n_train + n_val]
+    test_idx  = idx[n_train + n_val:]                                 # THÊM MỚI
+    print(f"  Train: {n_train:,}  |  Val: {n_val:,}  |  Test: {n_test:,}")  # THÊM MỚI
 
     # Fit scaler CHI tren train
     if os.path.exists(scaler_file):
@@ -419,6 +406,16 @@ def build_datasets(voltage_path, label_path, val_ratio, scaler_file, seed=42):
         with open(scaler_file, "wb") as f:
             pickle.dump({"volt": volt_scaler, "label": label_scaler}, f)
         print(f"  Fitted & saved scalers -> {scaler_file}")
+
+    # THÊM MỚI: Luu test_idx vao split_info.json de cell test dung lai
+    split_path = os.path.join(os.path.dirname(scaler_file), "split_info.json")
+    if not os.path.exists(split_path):
+        with open(split_path, "w") as f:
+            json.dump({"train": train_idx.tolist(),
+                       "val":   val_idx.tolist(),
+                       "test":  test_idx.tolist(),                    # THÊM MỚI
+                       "seed":  seed}, f)
+        print(f"  Split info saved -> {split_path}")                  # THÊM MỚI
 
     v_scaled = volt_scaler.transform(voltages)
     l_scaled = label_scaler.transform(labels)
@@ -479,7 +476,10 @@ def main():
     print(f"  Device      : {device} ({gpu_name})")
     print(f"  Voltage     : {cfg.voltage}")
     print(f"  Label       : {cfg.label}")
-    print(f"  Val ratio   : {cfg.val_ratio*100:.0f}%")
+    # THÊM MỚI: in split 70/20/10
+    print(f"  Split       : Train {(1-cfg.val_ratio-cfg.test_ratio)*100:.0f}%"
+          f" / Val {cfg.val_ratio*100:.0f}%"
+          f" / Test {cfg.test_ratio*100:.0f}%")
     print(f"  Epochs      : {cfg.num_epochs}  |  Batch: {cfg.batch_size}  |  LR: {cfg.lr}")
     print(f"  Loss        : HuberPoseLoss  ang_weight={cfg.ang_weight}"
           f"  delta_xyz={cfg.delta_xyz}  delta_ang={cfg.delta_ang}")
@@ -499,7 +499,8 @@ def main():
     # ── Dataset ───────────────────────────────────────────────────────────────
     print("Loading dataset ...")
     train_ds, val_ds, n_train, n_val = build_datasets(
-        cfg.voltage, cfg.label, cfg.val_ratio, scaler_file, seed=cfg.seed)
+        cfg.voltage, cfg.label, cfg.val_ratio, cfg.test_ratio,  # THÊM MỚI: cfg.test_ratio
+        scaler_file, seed=cfg.seed)
 
     pin = (device.type == "cuda")
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size,
