@@ -16,7 +16,7 @@ args = parser.parse_args()
 
 # ─── Import model ─────────────────────────────────────────────────────────────
 sys.path.insert(0, args.code_dir)
-from InvProb.model import Model  # noqa: E402
+from model import Model
 
 # ─── Load data ────────────────────────────────────────────────────────────────
 def _read(path):
