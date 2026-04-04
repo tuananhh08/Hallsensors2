@@ -1,26 +1,200 @@
-import argparse, sys, os, pickle, platform
+# import argparse, sys, os, pickle, platform
+# import numpy as np
+# import pandas as pd
+# import torch
+# import matplotlib.pyplot as plt
+# from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+# import csv
+# # ─── Args ─────────────────────────────────────────────────────────────────────
+# parser = argparse.ArgumentParser()
+# parser.add_argument("--voltage",  default="Helical_calib_data.csv")
+# parser.add_argument("--coords",   default="Hall_points_coordinates.csv")
+# parser.add_argument("--ckpt_dir", default="./ckpt")
+# parser.add_argument("--code_dir", default=".")
+# parser.add_argument("--out",      default="helical_result.png")
+# args = parser.parse_args()
+
+# # ─── Import model ─────────────────────────────────────────────────────────────
+# sys.path.insert(0, args.code_dir)
+# from model import Model
+
+# # ─── Load data ────────────────────────────────────────────────────────────────
+# def _read(path):
+#     """Doc CSV tu dong detect header, giu nguyen toan bo du lieu."""
+#     df = pd.read_csv(path, header=None)
+#     try:
+#         df.iloc[0].astype(float)
+#         has_header = False
+#     except (ValueError, TypeError):
+#         has_header = True
+#     if has_header:
+#         df = pd.read_csv(path, header=0)
+#     return df.apply(pd.to_numeric, errors="coerce").dropna().reset_index(drop=True)
+
+# print("Loading data...")
+# volt_df  = _read(args.voltage)
+# coord_df = pd.read_csv(args.coords)
+
+# voltages = volt_df.values.astype(np.float32)    # (N, 64)
+# gt_xyz   = coord_df[["x", "y", "z"]].values     # (N, 3)
+
+# print(f"  Voltage : {voltages.shape}")
+# print(f"  GT xyz  : {gt_xyz.shape}")
+
+# # ─── Load scalers ─────────────────────────────────────────────────────────────
+# scaler_path = os.path.join(args.ckpt_dir, "scalers.pkl")
+# print(f"Loading scalers from {scaler_path} ...")
+# with open(scaler_path, "rb") as f:
+#     scalers = pickle.load(f)
+# volt_scaler  = scalers["volt"]
+# label_scaler = scalers["label"]
+
+# # ─── Preprocess voltage ───────────────────────────────────────────────────────
+# volt_scaled = volt_scaler.transform(voltages)
+# volt_tensor = torch.tensor(volt_scaled, dtype=torch.float32).view(-1, 1, 8, 8)
+
+# # ─── Build model ──────────────────────────────────────────────────────────────
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# print(f"Device: {device}")
+
+# model = Model(out_dim=5).to(device)
+
+# # torch.compile chi tren Linux (Colab), bo qua tren Windows
+# if platform.system() != "Windows":
+#     try:
+#         model = torch.compile(model)
+#         print("torch.compile enabled")
+#     except Exception:
+#         print("torch.compile not available - skipping")
+# else:
+#     print("torch.compile disabled (Windows)")
+
+# # ─── Load checkpoint ──────────────────────────────────────────────────────────
+# ckpt_path = os.path.join(args.ckpt_dir, "best.pt")
+# print(f"Loading checkpoint from {ckpt_path} ...")
+# ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+
+# raw_state   = ckpt["model"]
+# is_compiled = hasattr(model, "_orig_mod")
+# if is_compiled:
+#     state = (raw_state if any(k.startswith("_orig_mod.") for k in raw_state)
+#              else {"_orig_mod." + k: v for k, v in raw_state.items()})
+# else:
+#     state = {k.replace("_orig_mod.", ""): v for k, v in raw_state.items()}
+
+# model.load_state_dict(state)
+# model.eval()
+# print(f"  Checkpoint epoch : {ckpt.get('epoch', '?')}")
+# print(f"  Best val loss    : {ckpt.get('best_val', 0):.6f}")
+
+# # ─── Inference ────────────────────────────────────────────────────────────────
+# print("Running inference...")
+# with torch.no_grad():
+#     pred_scaled = model(volt_tensor.to(device)).cpu().numpy()   # (N, 5)
+
+# pred_full = label_scaler.inverse_transform(pred_scaled)         # (N, 5)
+# pred_xyz  = pred_full[:, :3]                                    # (N, 3)
+
+# print(f"\n  {'Point':<8} {'Pred X':>10} {'Pred Y':>10} {'Pred Z':>10} {'GT X':>10} {'GT Y':>10} {'GT Z':>10} {'Err(mm)':>10}")
+# print("  " + "-" * 78)
+# for i in range(len(pred_xyz)):
+#     err = np.linalg.norm(pred_xyz[i] - gt_xyz[i]) * 1000
+#     print(f"  {i:<8} "
+#           f"{pred_xyz[i,0]:>10.4f} {pred_xyz[i,1]:>10.4f} {pred_xyz[i,2]:>10.4f} "
+#           f"{gt_xyz[i,0]:>10.4f} {gt_xyz[i,1]:>10.4f} {gt_xyz[i,2]:>10.4f} "
+#           f"{err:>10.2f}")
+# csv_path = os.path.join(args.ckpt_dir, "testresult.csv")
+# with open(csv_path, "w", newline="") as f:
+#     writer = csv.writer(f)
+#     writer.writerow(["Point", "Pred_X", "Pred_Y", "Pred_Z", "GT_X", "GT_Y", "GT_Z", "Err_mm"])
+#     for i in range(len(pred_xyz)):
+#         err = np.linalg.norm(pred_xyz[i] - gt_xyz[i]) * 1000
+#         writer.writerow([
+#             i,
+#             round(float(pred_xyz[i, 0]), 4),
+#             round(float(pred_xyz[i, 1]), 4),
+#             round(float(pred_xyz[i, 2]), 4),
+#             round(float(gt_xyz[i, 0]), 4),
+#             round(float(gt_xyz[i, 1]), 4),
+#             round(float(gt_xyz[i, 2]), 4),
+#             round(float(err), 2),
+#         ])
+# print(f"Saved CSV: {csv_path}")
+
+
+# # ─── Metrics ──────────────────────────────────────────────────────────────────
+# errors   = np.linalg.norm(pred_xyz - gt_xyz, axis=1)
+# mae_xyz  = np.abs(pred_xyz - gt_xyz).mean(axis=0)
+# rmse     = np.sqrt(np.mean(errors ** 2))
+# mean_err = errors.mean()
+# max_err  = errors.max()
+
+# print("\n─── Kết quả ────────────────────────────────────────")
+# print(f"  Mean Euclidean error : {mean_err * 1000:.2f} mm")
+# print(f"  RMSE                 : {rmse     * 1000:.2f} mm")
+# print(f"  Max error            : {max_err  * 1000:.2f} mm")
+# print(f"  MAE x                : {mae_xyz[0] * 1000:.2f} mm")
+# print(f"  MAE y                : {mae_xyz[1] * 1000:.2f} mm")
+# print(f"  MAE z                : {mae_xyz[2] * 1000:.2f} mm")
+# print("────────────────────────────────────────────────────\n")
+
+# # ─── Visualize ────────────────────────────────────────────────────────────────
+# fig = plt.figure(figsize=(10, 7))
+# ax  = fig.add_subplot(111, projection="3d")
+
+# ax.plot(gt_xyz[:, 0], gt_xyz[:, 1], gt_xyz[:, 2],
+#         color="blue", linewidth=2, label="Ground Truth")
+# ax.scatter(gt_xyz[:, 0], gt_xyz[:, 1], gt_xyz[:, 2],
+#            color="blue", s=30, zorder=5)
+
+# ax.plot(pred_xyz[:, 0], pred_xyz[:, 1], pred_xyz[:, 2], linestyle = '--',
+#         color="red", linewidth=2, label="Our approach")
+# ax.scatter(pred_xyz[:, 0], pred_xyz[:, 1], pred_xyz[:, 2],
+#            color="red", s=30, zorder=5)
+
+# ax.set_xlabel("X (m)")
+# ax.set_ylabel("Y (m)")
+# ax.set_zlabel("Z (m)")
+# ax.set_title(
+#     f"Helical Trajectory — Model Inference\n"
+#     f"Mean err: {mean_err*1000:.2f} mm  |  "
+#     f"RMSE: {rmse*1000:.2f} mm  |  "
+#     f"Max: {max_err*1000:.2f} mm",
+#     fontsize=11
+# )
+# ax.legend(fontsize=10)
+# ax.grid(True)
+
+# plt.tight_layout()
+# plt.savefig(args.out, dpi=150, bbox_inches="tight")
+# print(f"Saved: {args.out}")
+# plt.show()
+
+
+# test.py — dùng test split từ training data (split_info.json)
+import argparse, sys, os, pickle, json, platform, csv
 import numpy as np
 import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-import csv
+
 # ─── Args ─────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-parser.add_argument("--voltage",  default="Helical_calib_data.csv")
-parser.add_argument("--coords",   default="Hall_points_coordinates.csv")
+# THÊM MỚI: dùng cùng file data với train.py thay vì file Helical riêng
+parser.add_argument("--voltage",  default="grid_calib_data.csv")
+parser.add_argument("--label",    default="Grid_points_coordinates.csv")
 parser.add_argument("--ckpt_dir", default="./ckpt")
 parser.add_argument("--code_dir", default=".")
-parser.add_argument("--out",      default="helical_result.png")
+parser.add_argument("--out",      default="test_result_grid.png")
 args = parser.parse_args()
 
 # ─── Import model ─────────────────────────────────────────────────────────────
 sys.path.insert(0, args.code_dir)
-from model import Model
+from model import Model  # noqa: E402
 
 # ─── Load data ────────────────────────────────────────────────────────────────
 def _read(path):
-    """Doc CSV tu dong detect header, giu nguyen toan bo du lieu."""
     df = pd.read_csv(path, header=None)
     try:
         df.iloc[0].astype(float)
@@ -33,13 +207,22 @@ def _read(path):
 
 print("Loading data...")
 volt_df  = _read(args.voltage)
-coord_df = pd.read_csv(args.coords)
+label_df = _read(args.label)
 
-voltages = volt_df.values.astype(np.float32)    # (N, 64)
-gt_xyz   = coord_df[["x", "y", "z"]].values     # (N, 3)
-
+voltages = volt_df.values.astype(np.float32)         # (N, 64)
+labels   = label_df.values.astype(np.float32)        # (N, 5)
+N        = min(len(voltages), len(labels))
+voltages, labels = voltages[:N], labels[:N]
 print(f"  Voltage : {voltages.shape}")
-print(f"  GT xyz  : {gt_xyz.shape}")
+print(f"  Labels  : {labels.shape}")
+
+# THÊM MỚI: Load test_idx từ split_info.json được lưu lúc train
+split_path = os.path.join(args.ckpt_dir, "split_info.json")
+print(f"Loading split info from {split_path} ...")
+with open(split_path) as f:
+    split_info = json.load(f)
+test_idx = np.array(split_info["test"])              # THÊM MỚI: lấy đúng index test
+print(f"  Test samples: {len(test_idx)}")
 
 # ─── Load scalers ─────────────────────────────────────────────────────────────
 scaler_path = os.path.join(args.ckpt_dir, "scalers.pkl")
@@ -49,17 +232,19 @@ with open(scaler_path, "rb") as f:
 volt_scaler  = scalers["volt"]
 label_scaler = scalers["label"]
 
-# ─── Preprocess voltage ───────────────────────────────────────────────────────
-volt_scaled = volt_scaler.transform(voltages)
-volt_tensor = torch.tensor(volt_scaled, dtype=torch.float32).view(-1, 1, 8, 8)
+# THÊM MỚI: Chỉ lấy phần test theo test_idx, transform bằng scaler đã fit trên train
+volt_test   = volt_scaler.transform(voltages[test_idx])
+volt_tensor = torch.tensor(volt_test, dtype=torch.float32).view(-1, 1, 8, 8)
+
+# THÊM MỚI: Ground truth xyz của test set (inverse transform từ label gốc)
+gt_labels = labels[test_idx]                         # scaled labels chưa transform
+gt_xyz    = gt_labels[:, :3]                         # xyz gốc chưa scale, dùng trực tiếp
 
 # ─── Build model ──────────────────────────────────────────────────────────────
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}")
-
 model = Model(out_dim=5).to(device)
 
-# torch.compile chi tren Linux (Colab), bo qua tren Windows
 if platform.system() != "Windows":
     try:
         model = torch.compile(model)
@@ -90,23 +275,29 @@ print(f"  Best val loss    : {ckpt.get('best_val', 0):.6f}")
 # ─── Inference ────────────────────────────────────────────────────────────────
 print("Running inference...")
 with torch.no_grad():
-    pred_scaled = model(volt_tensor.to(device)).cpu().numpy()   # (N, 5)
+    pred_scaled = model(volt_tensor.to(device)).cpu().numpy()   # (N_test, 5)
 
-pred_full = label_scaler.inverse_transform(pred_scaled)         # (N, 5)
-pred_xyz  = pred_full[:, :3]                                    # (N, 3)
+# THÊM MỚI: inverse transform để lấy lại giá trị thực
+pred_full = label_scaler.inverse_transform(pred_scaled)         # (N_test, 5)
+pred_xyz  = pred_full[:, :3]                                    # (N_test, 3)
 
-print(f"\n  {'Point':<8} {'Pred X':>10} {'Pred Y':>10} {'Pred Z':>10} {'GT X':>10} {'GT Y':>10} {'GT Z':>10} {'Err(mm)':>10}")
-print("  " + "-" * 78)
+# In bảng kết quả
+print(f"\n  {'Point':<8} {'Pred X':>10} {'Pred Y':>10} {'Pred Z':>10} "
+      f"{'GT X':>10} {'GT Y':>10} {'GT Z':>10} {'Err(mm)':>10}")
+print("  " + "-" * 88)
 for i in range(len(pred_xyz)):
     err = np.linalg.norm(pred_xyz[i] - gt_xyz[i]) * 1000
     print(f"  {i:<8} "
           f"{pred_xyz[i,0]:>10.4f} {pred_xyz[i,1]:>10.4f} {pred_xyz[i,2]:>10.4f} "
           f"{gt_xyz[i,0]:>10.4f} {gt_xyz[i,1]:>10.4f} {gt_xyz[i,2]:>10.4f} "
           f"{err:>10.2f}")
+
+# THÊM MỚI: Xuất CSV kết quả test
 csv_path = os.path.join(args.ckpt_dir, "testresult.csv")
 with open(csv_path, "w", newline="") as f:
     writer = csv.writer(f)
-    writer.writerow(["Point", "Pred_X", "Pred_Y", "Pred_Z", "GT_X", "GT_Y", "GT_Z", "Err_mm"])
+    writer.writerow(["Point", "Pred_X", "Pred_Y", "Pred_Z",
+                     "GT_X", "GT_Y", "GT_Z", "Err_mm"])
     for i in range(len(pred_xyz)):
         err = np.linalg.norm(pred_xyz[i] - gt_xyz[i]) * 1000
         writer.writerow([
@@ -121,7 +312,6 @@ with open(csv_path, "w", newline="") as f:
         ])
 print(f"Saved CSV: {csv_path}")
 
-
 # ─── Metrics ──────────────────────────────────────────────────────────────────
 errors   = np.linalg.norm(pred_xyz - gt_xyz, axis=1)
 mae_xyz  = np.abs(pred_xyz - gt_xyz).mean(axis=0)
@@ -129,7 +319,8 @@ rmse     = np.sqrt(np.mean(errors ** 2))
 mean_err = errors.mean()
 max_err  = errors.max()
 
-print("\n─── Kết quả ────────────────────────────────────────")
+print("\n─── Kết quả test set ───────────────────────────────")
+print(f"  Số điểm test         : {len(test_idx)}")
 print(f"  Mean Euclidean error : {mean_err * 1000:.2f} mm")
 print(f"  RMSE                 : {rmse     * 1000:.2f} mm")
 print(f"  Max error            : {max_err  * 1000:.2f} mm")
@@ -142,21 +333,23 @@ print("────────────────────────�
 fig = plt.figure(figsize=(10, 7))
 ax  = fig.add_subplot(111, projection="3d")
 
-ax.plot(gt_xyz[:, 0], gt_xyz[:, 1], gt_xyz[:, 2],
-        color="blue", linewidth=2, label="Ground Truth")
 ax.scatter(gt_xyz[:, 0], gt_xyz[:, 1], gt_xyz[:, 2],
-           color="blue", s=30, zorder=5)
-
-ax.plot(pred_xyz[:, 0], pred_xyz[:, 1], pred_xyz[:, 2], linestyle = '--',
-        color="red", linewidth=2, label="Our approach")
+           color="blue", s=30, label="Ground Truth", zorder=5)
 ax.scatter(pred_xyz[:, 0], pred_xyz[:, 1], pred_xyz[:, 2],
-           color="red", s=30, zorder=5)
+           color="red", s=30, label="Predicted", zorder=5, marker="x")
+
+# THÊM MỚI: vẽ đường nối pred - gt để thấy rõ sai số từng điểm
+for i in range(len(pred_xyz)):
+    ax.plot([gt_xyz[i,0], pred_xyz[i,0]],
+            [gt_xyz[i,1], pred_xyz[i,1]],
+            [gt_xyz[i,2], pred_xyz[i,2]],
+            color="gray", linewidth=0.5, alpha=0.5)
 
 ax.set_xlabel("X (m)")
 ax.set_ylabel("Y (m)")
 ax.set_zlabel("Z (m)")
 ax.set_title(
-    f"Helical Trajectory — Model Inference\n"
+    f"Test Set Inference ({len(test_idx)} points)\n"
     f"Mean err: {mean_err*1000:.2f} mm  |  "
     f"RMSE: {rmse*1000:.2f} mm  |  "
     f"Max: {max_err*1000:.2f} mm",
@@ -167,5 +360,5 @@ ax.grid(True)
 
 plt.tight_layout()
 plt.savefig(args.out, dpi=150, bbox_inches="tight")
-print(f"Saved: {args.out}")
+print(f"Saved plot: {args.out}")
 plt.show()
