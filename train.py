@@ -332,7 +332,7 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from InvProb.model  import FCN
+from model import Model
 from loss import HuberPoseLoss
 
 
@@ -508,7 +508,7 @@ def main():
                               shuffle=False, pin_memory=pin)
 
     # ── Model + Loss ──────────────────────────────────────────────────────────
-    model     = FCN(out_dim=5).to(device)
+    model     = Model(out_dim=5).to(device)
     criterion = HuberPoseLoss(ang_weight=cfg.ang_weight,
                               delta_xyz=cfg.delta_xyz,
                               delta_ang=cfg.delta_ang)
