@@ -95,10 +95,14 @@ with torch.no_grad():
 pred_full = label_scaler.inverse_transform(pred_scaled)         # (N, 5)
 pred_xyz  = pred_full[:, :3]                                    # (N, 3)
 
-print("\n  Sample pred (first 3 points):")
-for i in range(min(3, len(pred_xyz))):
-    print(f"    [{i}] pred=({pred_xyz[i,0]:.4f}, {pred_xyz[i,1]:.4f}, {pred_xyz[i,2]:.4f})"
-          f"  gt=({gt_xyz[i,0]:.4f}, {gt_xyz[i,1]:.4f}, {gt_xyz[i,2]:.4f})")
+print(f"\n  {'Point':<8} {'Pred X':>10} {'Pred Y':>10} {'Pred Z':>10} {'GT X':>10} {'GT Y':>10} {'GT Z':>10} {'Err(mm)':>10}")
+print("  " + "-" * 78)
+for i in range(len(pred_xyz)):
+    err = np.linalg.norm(pred_xyz[i] - gt_xyz[i]) * 1000
+    print(f"  {i:<8} "
+          f"{pred_xyz[i,0]:>10.4f} {pred_xyz[i,1]:>10.4f} {pred_xyz[i,2]:>10.4f} "
+          f"{gt_xyz[i,0]:>10.4f} {gt_xyz[i,1]:>10.4f} {gt_xyz[i,2]:>10.4f} "
+          f"{err:>10.2f}")
 
 # ─── Metrics ──────────────────────────────────────────────────────────────────
 errors   = np.linalg.norm(pred_xyz - gt_xyz, axis=1)
