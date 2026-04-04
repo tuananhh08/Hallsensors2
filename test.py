@@ -4,7 +4,7 @@ import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
-
+import csv
 # ─── Args ─────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
 parser.add_argument("--voltage",  default="Helical_calib_data.csv")
@@ -103,6 +103,24 @@ for i in range(len(pred_xyz)):
           f"{pred_xyz[i,0]:>10.4f} {pred_xyz[i,1]:>10.4f} {pred_xyz[i,2]:>10.4f} "
           f"{gt_xyz[i,0]:>10.4f} {gt_xyz[i,1]:>10.4f} {gt_xyz[i,2]:>10.4f} "
           f"{err:>10.2f}")
+csv_path = os.path.join(args.ckpt_dir, "testresult.csv")
+with open(csv_path, "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow(["Point", "Pred_X", "Pred_Y", "Pred_Z", "GT_X", "GT_Y", "GT_Z", "Err_mm"])
+    for i in range(len(pred_xyz)):
+        err = np.linalg.norm(pred_xyz[i] - gt_xyz[i]) * 1000
+        writer.writerow([
+            i,
+            round(float(pred_xyz[i, 0]), 4),
+            round(float(pred_xyz[i, 1]), 4),
+            round(float(pred_xyz[i, 2]), 4),
+            round(float(gt_xyz[i, 0]), 4),
+            round(float(gt_xyz[i, 1]), 4),
+            round(float(gt_xyz[i, 2]), 4),
+            round(float(err), 2),
+        ])
+print(f"Saved CSV: {csv_path}")
+
 
 # ─── Metrics ──────────────────────────────────────────────────────────────────
 errors   = np.linalg.norm(pred_xyz - gt_xyz, axis=1)
