@@ -328,8 +328,8 @@ def get_config():
     p.add_argument("--ckpt_dir",     type=str,   default="./ckpt")
     p.add_argument("--val_ratio",    type=float, default=0.2,
                    help="Ti le validation (default=0.2)")
-    p.add_argument("--test_ratio",   type=float, default=0.1,        # THÊM MỚI
-                   help="Ti le test held-out (default=0.1)")          # THÊM MỚI
+    p.add_argument("--test_ratio",   type=float, default=0.03,        
+                   help="Ti le test held-out (default=0.1)")          
     p.add_argument("--batch_size",   type=int,   default=64)
     p.add_argument("--num_epochs",   type=int,   default=200)
     p.add_argument("--lr",           type=float, default=0.0098)
