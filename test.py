@@ -182,8 +182,8 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 # ─── Args ─────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
 # THÊM MỚI: dùng cùng file data với train.py thay vì file Helical riêng
-parser.add_argument("--voltage",  default="grid_calib_data.csv")
-parser.add_argument("--label",    default="Grid_points_coordinates.csv")
+parser.add_argument("--test_voltage",  default="grid_calib_data.csv")
+parser.add_argument("--test_label",    default="Grid_points_coordinates.csv")
 parser.add_argument("--ckpt_dir", default="./ckpt")
 parser.add_argument("--code_dir", default=".")
 parser.add_argument("--out",      default="test_result_grid.png")
@@ -206,8 +206,8 @@ def _read(path):
     return df.apply(pd.to_numeric, errors="coerce").dropna().reset_index(drop=True)
 
 print("Loading data...")
-volt_df  = _read(args.voltage)
-label_df = _read(args.label)
+volt_df  = _read(args.test_voltage)
+label_df = _read(args.test_label)
 
 voltages = volt_df.values.astype(np.float32)         # (N, 64)
 labels   = label_df.values.astype(np.float32)        # (N, 5)

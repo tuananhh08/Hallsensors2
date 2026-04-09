@@ -5,6 +5,7 @@
 # import torch.nn as nn
 # from torch.utils.data import Dataset, DataLoader
 # from sklearn.preprocessing import MinMaxScaler, StandardScaler
+# import matplotlib.pyplot as plt  # THÊM MỚI
 
 # sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # from model import Model
@@ -20,10 +21,10 @@
 #     p.add_argument("--label",        type=str,   default="Grid_points_coordinates.csv")
 #     p.add_argument("--ckpt_dir",     type=str,   default="./ckpt")
 #     p.add_argument("--val_ratio",    type=float, default=0.2,
-#                    help="Ti le validation (default=0.2 tuc 80/20)")
+#                    help="Ti le validation (default=0.2)")
 #     p.add_argument("--batch_size",   type=int,   default=64)
 #     p.add_argument("--num_epochs",   type=int,   default=200)
-#     p.add_argument("--lr",           type=float, default=0.0097)
+#     p.add_argument("--lr",           type=float, default=0.0098)
 #     p.add_argument("--weight_decay", type=float, default=0.0032)
 #     p.add_argument("--ang_weight",   type=float, default=1.0)
 #     p.add_argument("--delta_xyz",    type=float, default=0.055)
@@ -33,7 +34,6 @@
 #     p.add_argument("--patience",     type=int,   default=40)
 #     p.add_argument("--seed",         type=int,   default=42)
 #     return p.parse_args()
-
 
 # # =============================================================================
 # # DATASET
@@ -52,7 +52,7 @@
 #     def _read(path):
 #         df = pd.read_csv(path, header=None)
 #         try:
-#             df.iloc[0].astype(float)   # dong dau la so -> khong co header
+#             df.iloc[0].astype(float)
 #             has_header = False
 #         except (ValueError, TypeError):
 #             has_header = True
@@ -72,12 +72,13 @@
 #     voltages, labels = voltages[:N], labels[:N]
 #     print(f"  Total samples: {N:,}")
 
-#     # Split 80/20 theo seed
-#     rng     = np.random.default_rng(seed)
-#     idx     = rng.permutation(N)
-#     n_val   = int(N * val_ratio)
-#     n_train = N - n_val
-#     train_idx, val_idx = idx[:n_train], idx[n_train:]
+#     # Split train / val (khong co test split)
+#     rng       = np.random.default_rng(seed)
+#     idx       = rng.permutation(N)
+#     n_val     = int(N * val_ratio)
+#     n_train   = N - n_val
+#     train_idx = idx[:n_train]
+#     val_idx   = idx[n_train:]
 #     print(f"  Train: {n_train:,}  |  Val: {n_val:,}")
 
 #     # Fit scaler CHI tren train
@@ -98,11 +99,13 @@
 #     l_scaled = label_scaler.transform(labels)
 
 #     train_ds = PoseDataset(v_scaled[train_idx], l_scaled[train_idx])
-#     val_ds   = PoseDataset(v_scaled[val_idx],   l_scaled[val_idx])
+#     val_ds   = PoseDataset(v_scaled[val_idx],  l_scaled[val_idx])
 #     return train_ds, val_ds, n_train, n_val
 
 
+# # =============================================================================
 # # CHECKPOINT HELPERS
+# # =============================================================================
 
 # def save_checkpoint(path, epoch, model, optimizer, scheduler, val_loss, best_val):
 #     torch.save({
@@ -140,7 +143,10 @@
 #     with open(log_file, "w") as f:
 #         json.dump(log, f, indent=2)
 
+
+# # =============================================================================
 # # MAIN
+# # =============================================================================
 
 # def main():
 #     cfg    = get_config()
@@ -153,7 +159,7 @@
 #     print(f"  Device      : {device} ({gpu_name})")
 #     print(f"  Voltage     : {cfg.voltage}")
 #     print(f"  Label       : {cfg.label}")
-#     print(f"  Val ratio   : {cfg.val_ratio*100:.0f}%")
+#     print(f"  Split       : Train {(1-cfg.val_ratio)*100:.0f}% / Val {cfg.val_ratio*100:.0f}%")
 #     print(f"  Epochs      : {cfg.num_epochs}  |  Batch: {cfg.batch_size}  |  LR: {cfg.lr}")
 #     print(f"  Loss        : HuberPoseLoss  ang_weight={cfg.ang_weight}"
 #           f"  delta_xyz={cfg.delta_xyz}  delta_ang={cfg.delta_ang}")
@@ -196,7 +202,6 @@
 #     scheduler  = torch.optim.lr_scheduler.SequentialLR(
 #         optimizer, schedulers=[warmup_sch, cosine_sch], milestones=[cfg.warmup_epochs])
 
-#     # torch.compile — chi dung tren Linux/Mac, bo qua tren Windows
 #     import platform
 #     if platform.system() != "Windows":
 #         try:
@@ -209,10 +214,23 @@
 
 #     # ── Resume ────────────────────────────────────────────────────────────────
 #     start_epoch, best_val = 1, float("inf")
+#     train_losses_history = []  # THÊM MỚI ĐỂ VẼ ĐỒ THỊ
+#     val_losses_history = []    # THÊM MỚI ĐỂ VẼ ĐỒ THỊ
+
 #     if os.path.exists(ckpt_latest):
 #         print(f"Resuming from {ckpt_latest} ...")
 #         start_epoch, best_val = load_checkpoint(
 #             ckpt_latest, model, optimizer, scheduler, device)
+        
+#         # Load lại history từ log để vẽ tiếp đồ thị nếu resume
+#         if os.path.exists(log_file):
+#             with open(log_file, "r") as f:
+#                 try:
+#                     history = json.load(f)
+#                     train_losses_history = [x['train'] for x in history]
+#                     val_losses_history = [x['val'] for x in history]
+#                 except: pass
+        
 #         start_epoch += 1
 #         print(f"  -> Epoch {start_epoch}  best_val={best_val:.6f}\n")
 #     else:
@@ -267,6 +285,10 @@
 #         val_xyz  /= n_val
 #         val_ang  /= n_val
 
+#         # LƯU VÀO HISTORY ĐỂ VẼ ĐỒ THỊ (THÊM MỚI)
+#         train_losses_history.append(train_loss)
+#         val_losses_history.append(val_loss)
+
 #         lr_now  = optimizer.param_groups[0]["lr"]
 #         elapsed = time.time() - t0
 #         print(f"{epoch:>6}  {train_loss:>9.5f}  {val_loss:>9.5f}  "
@@ -283,7 +305,7 @@
 #             best_val, no_improve = val_loss, 0
 #             save_checkpoint(ckpt_best, epoch, model, optimizer, scheduler,
 #                             val_loss, best_val)
-#             print(f"         >> Best saved  val={best_val:.6f} "
+#             print(f"          >> Best saved  val={best_val:.6f} "
 #                   f"(xyz={val_xyz:.5f}  ang={val_ang:.5f})", flush=True)
 #         else:
 #             no_improve += 1
@@ -296,8 +318,19 @@
 #             print(f"\nEarly stopping (no improvement for {cfg.patience} epochs)")
 #             break
 
+#     # --- PHẦN VẼ ĐỒ THỊ (THÊM MỚI Ở CUỐI) ---
+#     plt.figure(figsize=(10, 6))
+#     plt.plot(train_losses_history, label='Train Loss', color='blue')
+#     plt.plot(val_losses_history, label='Val Loss', color='red')
+#     plt.title('Loss History')
+#     plt.xlabel('Epochs')
+#     plt.ylabel('Loss')
+#     plt.legend()
+#     plt.grid(True)
+#     plot_path = os.path.join(cfg.ckpt_dir, "loss_plot.png")
+#     plt.savefig(plot_path)
 #     print(f"\nDone! Best val loss = {best_val:.6f}")
-#     print(f"Checkpoints -> {cfg.ckpt_dir}")
+#     print(f"Checkpoints & Plot -> {cfg.ckpt_dir}")
 
 
 # if __name__ == "__main__":
@@ -311,6 +344,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
+import matplotlib.pyplot as plt  # THÊM MỚI
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import Model
@@ -413,7 +447,7 @@ def build_datasets(voltage_path, label_path, val_ratio, test_ratio,  # THÊM M�
         with open(split_path, "w") as f:
             json.dump({"train": train_idx.tolist(),
                        "val":   val_idx.tolist(),
-                       "test":  test_idx.tolist(),                    # THÊM MỚI
+                       "test":  test_idx.tolist(),                                    # THÊM MỚI
                        "seed":  seed}, f)
         print(f"  Split info saved -> {split_path}")                  # THÊM MỚI
 
@@ -476,7 +510,7 @@ def main():
     print(f"  Device      : {device} ({gpu_name})")
     print(f"  Voltage     : {cfg.voltage}")
     print(f"  Label       : {cfg.label}")
-    # THÊM MỚI: in split 70/20/10
+    # split 
     print(f"  Split       : Train {(1-cfg.val_ratio-cfg.test_ratio)*100:.0f}%"
           f" / Val {cfg.val_ratio*100:.0f}%"
           f" / Test {cfg.test_ratio*100:.0f}%")
@@ -534,12 +568,25 @@ def main():
     else:
         print("torch.compile disabled (Windows)")
 
-    # ── Resume ────────────────────────────────────────────────────────────────
+    # ── Resume & History Initialization ───────────────────────────────────────
     start_epoch, best_val = 1, float("inf")
+    train_losses_history = []  # THÊM MỚI ĐỂ VẼ ĐỒ THỊ
+    val_losses_history = []    # THÊM MỚI ĐỂ VẼ ĐỒ THỊ
+
     if os.path.exists(ckpt_latest):
         print(f"Resuming from {ckpt_latest} ...")
         start_epoch, best_val = load_checkpoint(
             ckpt_latest, model, optimizer, scheduler, device)
+        
+        # Load lại history từ log để vẽ tiếp đồ thị nếu resume
+        if os.path.exists(log_file):
+            with open(log_file, "r") as f:
+                try:
+                    history = json.load(f)
+                    train_losses_history = [x['train'] for x in history]
+                    val_losses_history = [x['val'] for x in history]
+                except: pass
+        
         start_epoch += 1
         print(f"  -> Epoch {start_epoch}  best_val={best_val:.6f}\n")
     else:
@@ -594,6 +641,10 @@ def main():
         val_xyz  /= n_val
         val_ang  /= n_val
 
+        # LƯU VÀO HISTORY ĐỂ VẼ ĐỒ THỊ
+        train_losses_history.append(train_loss)
+        val_losses_history.append(val_loss)
+
         lr_now  = optimizer.param_groups[0]["lr"]
         elapsed = time.time() - t0
         print(f"{epoch:>6}  {train_loss:>9.5f}  {val_loss:>9.5f}  "
@@ -610,7 +661,7 @@ def main():
             best_val, no_improve = val_loss, 0
             save_checkpoint(ckpt_best, epoch, model, optimizer, scheduler,
                             val_loss, best_val)
-            print(f"         >> Best saved  val={best_val:.6f} "
+            print(f"          >> Best saved  val={best_val:.6f} "
                   f"(xyz={val_xyz:.5f}  ang={val_ang:.5f})", flush=True)
         else:
             no_improve += 1
@@ -623,8 +674,22 @@ def main():
             print(f"\nEarly stopping (no improvement for {cfg.patience} epochs)")
             break
 
+    # --- VẼ ĐỒ THỊ ---
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_losses_history, label='Train Loss', color='blue', linewidth=1.5)
+    plt.plot(val_losses_history, label='Val Loss', color='red', linewidth=1.5)
+    plt.title('Training and Validation Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    plot_path = os.path.join(cfg.ckpt_dir, "loss_plot.png")
+    plt.savefig(plot_path)
+    plt.close() 
+
     print(f"\nDone! Best val loss = {best_val:.6f}")
-    print(f"Checkpoints -> {cfg.ckpt_dir}")
+    print(f"Checkpoints & Plot -> {cfg.ckpt_dir}")
 
 
 if __name__ == "__main__":
