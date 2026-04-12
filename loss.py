@@ -21,5 +21,5 @@ class HuberPoseLoss(nn.Module):
                                 delta=self.delta_xyz)
         loss_ang = F.huber_loss(pred[:, 3:], target[:, 3:],
                                 delta=self.delta_ang)
-        total = loss_xyz + self.ang_weight * loss_ang
+        total = (1-self.ang_weight) * loss_xyz + self.ang_weight * loss_ang
         return total, loss_xyz, loss_ang
