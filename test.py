@@ -181,7 +181,6 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 # ─── Args ─────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
-# THÊM MỚI: dùng cùng file data với train.py thay vì file Helical riêng
 parser.add_argument("--test_voltage",  default="grid_calib_data.csv")
 parser.add_argument("--test_label",    default="Grid_points_coordinates.csv")
 parser.add_argument("--ckpt_dir", default="./ckpt")
@@ -216,12 +215,12 @@ voltages, labels = voltages[:N], labels[:N]
 print(f"  Voltage : {voltages.shape}")
 print(f"  Labels  : {labels.shape}")
 
-# THÊM MỚI: Load test_idx từ split_info.json được lưu lúc train
+# Load test_idx từ split_info.json
 split_path = os.path.join(args.ckpt_dir, "split_info.json")
 print(f"Loading split info from {split_path} ...")
 with open(split_path) as f:
     split_info = json.load(f)
-test_idx = np.array(split_info["test"])              # THÊM MỚI: lấy đúng index test
+test_idx = np.array(split_info["test"])
 print(f"  Test samples: {len(test_idx)}")
 
 # ─── Load scalers ─────────────────────────────────────────────────────────────
@@ -232,13 +231,13 @@ with open(scaler_path, "rb") as f:
 volt_scaler  = scalers["volt"]
 label_scaler = scalers["label"]
 
-# THÊM MỚI: Chỉ lấy phần test theo test_idx, transform bằng scaler đã fit trên train
 volt_test   = volt_scaler.transform(voltages[test_idx])
 volt_tensor = torch.tensor(volt_test, dtype=torch.float32).view(-1, 1, 8, 8)
 
-# THÊM MỚI: Ground truth xyz của test set (inverse transform từ label gốc)
-gt_labels = labels[test_idx]                         # scaled labels chưa transform
-gt_xyz    = gt_labels[:, :3]                         # xyz gốc chưa scale, dùng trực tiếp
+gt_labels = labels[test_idx]          # (N_test, 5) — giá trị gốc chưa scale
+gt_xyz    = gt_labels[:, :3]          # (N_test, 3) đơn vị m
+gt_ang    = gt_labels[:, 3:]          # (N_test, 2) — col 3: alpha, col 4: beta
+                                      # Giả sử label gốc lưu dưới dạng cos(angle)
 
 # ─── Build model ──────────────────────────────────────────────────────────────
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -277,68 +276,118 @@ print("Running inference...")
 with torch.no_grad():
     pred_scaled = model(volt_tensor.to(device)).cpu().numpy()   # (N_test, 5)
 
-# THÊM MỚI: inverse transform để lấy lại giá trị thực
+# Inverse transform toàn bộ 5 chiều
 pred_full = label_scaler.inverse_transform(pred_scaled)         # (N_test, 5)
-pred_xyz  = pred_full[:, :3]                                    # (N_test, 3)
+pred_xyz  = pred_full[:, :3]                                    # (N_test, 3) — m
+pred_cos  = pred_full[:, 3:]                                    # (N_test, 2) — cos values
 
-# In bảng kết quả
-print(f"\n  {'Point':<8} {'Pred X':>10} {'Pred Y':>10} {'Pred Z':>10} "
-      f"{'GT X':>10} {'GT Y':>10} {'GT Z':>10} {'Err(mm)':>10}")
-print("  " + "-" * 88)
+# ─── Chuyển đổi góc: cos → rad → degree ──────────────────────────────────────
+# clip để tránh domain error khi cos hơi vượt [-1, 1] do floating point
+pred_cos_clipped = np.clip(pred_cos, -1.0, 1.0)
+gt_cos_clipped   = np.clip(gt_ang,   -1.0, 1.0)
+
+pred_ang_rad = np.arccos(pred_cos_clipped)          # (N_test, 2) — radian
+gt_ang_rad   = np.arccos(gt_cos_clipped)            # (N_test, 2) — radian
+
+pred_ang_deg = np.degrees(pred_ang_rad)             # (N_test, 2) — degree
+gt_ang_deg   = np.degrees(gt_ang_rad)               # (N_test, 2) — degree
+
+# ─── Metrics per sample ───────────────────────────────────────────────────────
+pos_err_per_sample  = np.linalg.norm(pred_xyz - gt_xyz, axis=1) * 1000      # mm
+ang_err_per_sample  = np.abs(pred_ang_deg - gt_ang_deg)                      # deg, (N,2)
+ang_err_total       = ang_err_per_sample.mean(axis=1)                        # mean of alpha+beta
+
+# Cumulative RMSE per sample (running)
+pos_rmse_per_sample = np.sqrt(np.cumsum(pos_err_per_sample**2)
+                               / np.arange(1, len(pos_err_per_sample) + 1))
+ang_rmse_per_sample = np.sqrt(np.cumsum(ang_err_total**2)
+                               / np.arange(1, len(ang_err_total) + 1))
+
+# Running mean per sample
+pos_mean_running = np.cumsum(pos_err_per_sample) / np.arange(1, len(pos_err_per_sample) + 1)
+ang_mean_running = np.cumsum(ang_err_total)      / np.arange(1, len(ang_err_total) + 1)
+
+# Global metrics
+pos_errors = np.linalg.norm(pred_xyz - gt_xyz, axis=1)
+mae_xyz    = np.abs(pred_xyz - gt_xyz).mean(axis=0)
+rmse_pos   = np.sqrt(np.mean(pos_errors**2))
+mean_pos   = pos_errors.mean()
+max_pos    = pos_errors.max()
+
+ang_err_alpha = np.abs(pred_ang_deg[:, 0] - gt_ang_deg[:, 0])
+ang_err_beta  = np.abs(pred_ang_deg[:, 1] - gt_ang_deg[:, 1])
+rmse_alpha    = np.sqrt(np.mean(ang_err_alpha**2))
+rmse_beta     = np.sqrt(np.mean(ang_err_beta**2))
+mean_alpha    = ang_err_alpha.mean()
+mean_beta     = ang_err_beta.mean()
+max_alpha     = ang_err_alpha.max()
+max_beta      = ang_err_beta.max()
+
+# ─── Print table ──────────────────────────────────────────────────────────────
+print(f"\n  {'Pt':<5} {'PX':>8} {'PY':>8} {'PZ':>8} "
+      f"{'GX':>8} {'GY':>8} {'GZ':>8} {'Err(mm)':>9} "
+      f"{'Pa°':>8} {'Pb°':>8} {'Ga°':>8} {'Gb°':>8}")
+print("  " + "-" * 110)
 for i in range(len(pred_xyz)):
-    err = np.linalg.norm(pred_xyz[i] - gt_xyz[i]) * 1000
-    print(f"  {i:<8} "
-          f"{pred_xyz[i,0]:>10.4f} {pred_xyz[i,1]:>10.4f} {pred_xyz[i,2]:>10.4f} "
-          f"{gt_xyz[i,0]:>10.4f} {gt_xyz[i,1]:>10.4f} {gt_xyz[i,2]:>10.4f} "
-          f"{err:>10.2f}")
+    err = pos_err_per_sample[i]
+    print(f"  {i:<5} "
+          f"{pred_xyz[i,0]:>8.4f} {pred_xyz[i,1]:>8.4f} {pred_xyz[i,2]:>8.4f} "
+          f"{gt_xyz[i,0]:>8.4f} {gt_xyz[i,1]:>8.4f} {gt_xyz[i,2]:>8.4f} "
+          f"{err:>9.2f} "
+          f"{pred_ang_deg[i,0]:>8.3f} {pred_ang_deg[i,1]:>8.3f} "
+          f"{gt_ang_deg[i,0]:>8.3f} {gt_ang_deg[i,1]:>8.3f}")
 
-# THÊM MỚI: Xuất CSV kết quả test
-csv_path = os.path.join(args.ckpt_dir, "testresult.csv")
-with open(csv_path, "w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(["Point", "Pred_X", "Pred_Y", "Pred_Z",
-                     "GT_X", "GT_Y", "GT_Z", "Err_mm"])
-    for i in range(len(pred_xyz)):
-        err = np.linalg.norm(pred_xyz[i] - gt_xyz[i]) * 1000
-        writer.writerow([
-            i,
-            round(float(pred_xyz[i, 0]), 4),
-            round(float(pred_xyz[i, 1]), 4),
-            round(float(pred_xyz[i, 2]), 4),
-            round(float(gt_xyz[i, 0]), 4),
-            round(float(gt_xyz[i, 1]), 4),
-            round(float(gt_xyz[i, 2]), 4),
-            round(float(err), 2),
-        ])
-print(f"Saved CSV: {csv_path}")
-
-# ─── Metrics ──────────────────────────────────────────────────────────────────
-errors   = np.linalg.norm(pred_xyz - gt_xyz, axis=1)
-mae_xyz  = np.abs(pred_xyz - gt_xyz).mean(axis=0)
-rmse     = np.sqrt(np.mean(errors ** 2))
-mean_err = errors.mean()
-max_err  = errors.max()
-
-print("\n─── Kết quả test set ───────────────────────────────")
+# ─── Print metrics ────────────────────────────────────────────────────────────
+print("\n─── Kết quả test set ───────────────────────────────────────────────")
 print(f"  Số điểm test         : {len(test_idx)}")
-print(f"  Mean Euclidean error : {mean_err * 1000:.2f} mm")
-print(f"  RMSE                 : {rmse     * 1000:.2f} mm")
-print(f"  Max error            : {max_err  * 1000:.2f} mm")
+print(f"  Mean Euclidean error : {mean_pos * 1000:.2f} mm")
+print(f"  RMSE position        : {rmse_pos * 1000:.2f} mm")
+print(f"  Max position error   : {max_pos  * 1000:.2f} mm")
 print(f"  MAE x                : {mae_xyz[0] * 1000:.2f} mm")
 print(f"  MAE y                : {mae_xyz[1] * 1000:.2f} mm")
 print(f"  MAE z                : {mae_xyz[2] * 1000:.2f} mm")
-print("────────────────────────────────────────────────────\n")
+print(f"  Mean alpha error     : {mean_alpha:.3f}°   RMSE: {rmse_alpha:.3f}°   Max: {max_alpha:.3f}°")
+print(f"  Mean beta  error     : {mean_beta:.3f}°   RMSE: {rmse_beta:.3f}°   Max: {max_beta:.3f}°")
+print("────────────────────────────────────────────────────────────────────\n")
 
-# ─── Visualize ────────────────────────────────────────────────────────────────
-fig = plt.figure(figsize=(10, 7))
-ax  = fig.add_subplot(111, projection="3d")
+# ─── Xuất CSV ─────────────────────────────────────────────────────────────────
+csv_path = os.path.join(args.ckpt_dir, "testresult.csv")
+with open(csv_path, "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow(["Point",
+                     "Pred_X", "Pred_Y", "Pred_Z",
+                     "GT_X",   "GT_Y",   "GT_Z",   "PosErr_mm",
+                     "Pred_alpha_deg", "Pred_beta_deg",
+                     "GT_alpha_deg",   "GT_beta_deg",
+                     "Err_alpha_deg",  "Err_beta_deg"])
+    for i in range(len(pred_xyz)):
+        writer.writerow([
+            i,
+            round(float(pred_xyz[i, 0]),    4),
+            round(float(pred_xyz[i, 1]),    4),
+            round(float(pred_xyz[i, 2]),    4),
+            round(float(gt_xyz[i, 0]),      4),
+            round(float(gt_xyz[i, 1]),      4),
+            round(float(gt_xyz[i, 2]),      4),
+            round(float(pos_err_per_sample[i]), 2),
+            round(float(pred_ang_deg[i, 0]), 4),
+            round(float(pred_ang_deg[i, 1]), 4),
+            round(float(gt_ang_deg[i, 0]),   4),
+            round(float(gt_ang_deg[i, 1]),   4),
+            round(float(ang_err_alpha[i]),   4),
+            round(float(ang_err_beta[i]),    4),
+        ])
+print(f"Saved CSV: {csv_path}")
 
-ax.scatter(gt_xyz[:, 0], gt_xyz[:, 1], gt_xyz[:, 2],
+# ─── Figure 1: 3D scatter GT vs Predicted ─────────────────────────────────────
+fig1 = plt.figure(figsize=(10, 7))
+ax   = fig1.add_subplot(111, projection="3d")
+
+ax.scatter(gt_xyz[:, 0],   gt_xyz[:, 1],   gt_xyz[:, 2],
            color="blue", s=30, label="Ground Truth", zorder=5)
 ax.scatter(pred_xyz[:, 0], pred_xyz[:, 1], pred_xyz[:, 2],
-           color="red", s=30, label="Predicted", zorder=5, marker="x")
+           color="red",  s=30, label="Predicted", zorder=5, marker="x")
 
-# THÊM MỚI: vẽ đường nối pred - gt để thấy rõ sai số từng điểm
 for i in range(len(pred_xyz)):
     ax.plot([gt_xyz[i,0], pred_xyz[i,0]],
             [gt_xyz[i,1], pred_xyz[i,1]],
@@ -350,15 +399,84 @@ ax.set_ylabel("Y (m)")
 ax.set_zlabel("Z (m)")
 ax.set_title(
     f"Test Set Inference ({len(test_idx)} points)\n"
-    f"Mean err: {mean_err*1000:.2f} mm  |  "
-    f"RMSE: {rmse*1000:.2f} mm  |  "
-    f"Max: {max_err*1000:.2f} mm",
+    f"Mean err: {mean_pos*1000:.2f} mm  |  "
+    f"RMSE: {rmse_pos*1000:.2f} mm  |  "
+    f"Max: {max_pos*1000:.2f} mm",
     fontsize=11
 )
 ax.legend(fontsize=10)
 ax.grid(True)
-
 plt.tight_layout()
-plt.savefig(args.out, dpi=150, bbox_inches="tight")
-print(f"Saved plot: {args.out}")
+
+out_fig1 = args.out
+fig1.savefig(out_fig1, dpi=150, bbox_inches="tight")
+print(f"Saved Figure 1: {out_fig1}")
+
+# ─── Figure 2: Position error per sample ──────────────────────────────────────
+sample_idx = np.arange(1, len(pos_err_per_sample) + 1)
+
+fig2, ax2 = plt.subplots(figsize=(11, 5))
+
+ax2.plot(sample_idx, pos_err_per_sample,
+         color="#5B9BD5", linewidth=0.8, alpha=0.55, label="Per-sample error")
+ax2.plot(sample_idx, pos_mean_running,
+         color="#2E75B6", linewidth=2.0, label=f"Running mean  (final {pos_mean_running[-1]:.2f} mm)")
+ax2.plot(sample_idx, pos_rmse_per_sample,
+         color="#C55A11", linewidth=2.0, linestyle="--",
+         label=f"Running RMSE  (final {pos_rmse_per_sample[-1]:.2f} mm)")
+
+ax2.axhline(mean_pos * 1000, color="#2E75B6", linewidth=0.8, linestyle=":")
+ax2.axhline(rmse_pos * 1000, color="#C55A11", linewidth=0.8, linestyle=":")
+
+ax2.set_xlabel("Sample index", fontsize=12)
+ax2.set_ylabel("Position error (mm)", fontsize=12)
+ax2.set_title("Position Error per Sample", fontsize=13)
+ax2.legend(fontsize=10)
+ax2.grid(True, linestyle="--", alpha=0.5)
+ax2.set_xlim(1, len(sample_idx))
+ax2.set_ylim(bottom=0)
+plt.tight_layout()
+
+out_fig2 = os.path.join(os.path.dirname(args.out), "position_error.png")
+fig2.savefig(out_fig2, dpi=150, bbox_inches="tight")
+print(f"Saved Figure 2: {out_fig2}")
+
+# ─── Figure 3: Orientation error per sample ───────────────────────────────────
+fig3, axes = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+
+for ax_i, (err_arr, name, rmse_val, mean_val) in zip(
+    axes,
+    [(ang_err_alpha, "Alpha", rmse_alpha, mean_alpha),
+     (ang_err_beta,  "Beta",  rmse_beta,  mean_beta)]
+):
+    running_mean = np.cumsum(err_arr) / np.arange(1, len(err_arr) + 1)
+    running_rmse = np.sqrt(np.cumsum(err_arr**2) / np.arange(1, len(err_arr) + 1))
+
+    ax_i.plot(sample_idx, err_arr,
+              color="#70AD47", linewidth=0.8, alpha=0.55, label="Per-sample error")
+    ax_i.plot(sample_idx, running_mean,
+              color="#375623", linewidth=2.0,
+              label=f"Running mean  (final {running_mean[-1]:.3f}°)")
+    ax_i.plot(sample_idx, running_rmse,
+              color="#843C0C", linewidth=2.0, linestyle="--",
+              label=f"Running RMSE  (final {running_rmse[-1]:.3f}°)")
+
+    ax_i.axhline(mean_val, color="#375623", linewidth=0.8, linestyle=":")
+    ax_i.axhline(rmse_val, color="#843C0C", linewidth=0.8, linestyle=":")
+
+    ax_i.set_ylabel(f"{name} error (°)", fontsize=11)
+    ax_i.set_title(f"Orientation Error — {name}", fontsize=12)
+    ax_i.legend(fontsize=9)
+    ax_i.grid(True, linestyle="--", alpha=0.5)
+    ax_i.set_ylim(bottom=0)
+
+axes[-1].set_xlabel("Sample index", fontsize=12)
+axes[-1].set_xlim(1, len(sample_idx))
+fig3.suptitle("Orientation Error per Sample (cos → rad → degree)", fontsize=13, y=1.01)
+plt.tight_layout()
+
+out_fig3 = os.path.join(os.path.dirname(args.out), "orientation_error.png")
+fig3.savefig(out_fig3, dpi=150, bbox_inches="tight")
+print(f"Saved Figure 3: {out_fig3}")
+
 plt.show()

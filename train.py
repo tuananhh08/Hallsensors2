@@ -11,6 +11,7 @@
 # from model import Model
 # from loss import HuberPoseLoss
 
+
 # # =============================================================================
 # # CONFIG
 # # =============================================================================
@@ -21,10 +22,10 @@
 #     p.add_argument("--label",        type=str,   default="Grid_points_coordinates.csv")
 #     p.add_argument("--ckpt_dir",     type=str,   default="./ckpt")
 #     p.add_argument("--val_ratio",    type=float, default=0.2,
-#                    help="Ti le validation (default=0.2)")
+#                    help="Ti le validation (default=0.2 tuc 80/20)")
 #     p.add_argument("--batch_size",   type=int,   default=64)
 #     p.add_argument("--num_epochs",   type=int,   default=200)
-#     p.add_argument("--lr",           type=float, default=0.0098)
+#     p.add_argument("--lr",           type=float, default=0.0097)
 #     p.add_argument("--weight_decay", type=float, default=0.0032)
 #     p.add_argument("--ang_weight",   type=float, default=1.0)
 #     p.add_argument("--delta_xyz",    type=float, default=0.055)
@@ -34,6 +35,7 @@
 #     p.add_argument("--patience",     type=int,   default=40)
 #     p.add_argument("--seed",         type=int,   default=42)
 #     return p.parse_args()
+
 
 # # =============================================================================
 # # DATASET
@@ -52,7 +54,7 @@
 #     def _read(path):
 #         df = pd.read_csv(path, header=None)
 #         try:
-#             df.iloc[0].astype(float)
+#             df.iloc[0].astype(float)   # dong dau la so -> khong co header
 #             has_header = False
 #         except (ValueError, TypeError):
 #             has_header = True
@@ -72,13 +74,12 @@
 #     voltages, labels = voltages[:N], labels[:N]
 #     print(f"  Total samples: {N:,}")
 
-#     # Split train / val (khong co test split)
-#     rng       = np.random.default_rng(seed)
-#     idx       = rng.permutation(N)
-#     n_val     = int(N * val_ratio)
-#     n_train   = N - n_val
-#     train_idx = idx[:n_train]
-#     val_idx   = idx[n_train:]
+#     # Split 80/20 theo seed
+#     rng     = np.random.default_rng(seed)
+#     idx     = rng.permutation(N)
+#     n_val   = int(N * val_ratio)
+#     n_train = N - n_val
+#     train_idx, val_idx = idx[:n_train], idx[n_train:]
 #     print(f"  Train: {n_train:,}  |  Val: {n_val:,}")
 
 #     # Fit scaler CHI tren train
@@ -99,13 +100,11 @@
 #     l_scaled = label_scaler.transform(labels)
 
 #     train_ds = PoseDataset(v_scaled[train_idx], l_scaled[train_idx])
-#     val_ds   = PoseDataset(v_scaled[val_idx],  l_scaled[val_idx])
+#     val_ds   = PoseDataset(v_scaled[val_idx],   l_scaled[val_idx])
 #     return train_ds, val_ds, n_train, n_val
 
 
-# # =============================================================================
 # # CHECKPOINT HELPERS
-# # =============================================================================
 
 # def save_checkpoint(path, epoch, model, optimizer, scheduler, val_loss, best_val):
 #     torch.save({
@@ -143,10 +142,7 @@
 #     with open(log_file, "w") as f:
 #         json.dump(log, f, indent=2)
 
-
-# # =============================================================================
 # # MAIN
-# # =============================================================================
 
 # def main():
 #     cfg    = get_config()
@@ -159,7 +155,7 @@
 #     print(f"  Device      : {device} ({gpu_name})")
 #     print(f"  Voltage     : {cfg.voltage}")
 #     print(f"  Label       : {cfg.label}")
-#     print(f"  Split       : Train {(1-cfg.val_ratio)*100:.0f}% / Val {cfg.val_ratio*100:.0f}%")
+#     print(f"  Val ratio   : {cfg.val_ratio*100:.0f}%")
 #     print(f"  Epochs      : {cfg.num_epochs}  |  Batch: {cfg.batch_size}  |  LR: {cfg.lr}")
 #     print(f"  Loss        : HuberPoseLoss  ang_weight={cfg.ang_weight}"
 #           f"  delta_xyz={cfg.delta_xyz}  delta_ang={cfg.delta_ang}")
@@ -212,17 +208,17 @@
 #     else:
 #         print("torch.compile disabled (Windows)")
 
-#     # ── Resume ────────────────────────────────────────────────────────────────
+#     # ── Resume & History Initialization ───────────────────────────────────────
 #     start_epoch, best_val = 1, float("inf")
-#     train_losses_history = []  # THÊM MỚI ĐỂ VẼ ĐỒ THỊ
-#     val_losses_history = []    # THÊM MỚI ĐỂ VẼ ĐỒ THỊ
+#     train_losses_history = []  
+#     val_losses_history = []    
 
 #     if os.path.exists(ckpt_latest):
 #         print(f"Resuming from {ckpt_latest} ...")
 #         start_epoch, best_val = load_checkpoint(
 #             ckpt_latest, model, optimizer, scheduler, device)
         
-#         # Load lại history từ log để vẽ tiếp đồ thị nếu resume
+#         # Load lại lịch sử từ log nếu có để vẽ đồ thị liên tục
 #         if os.path.exists(log_file):
 #             with open(log_file, "r") as f:
 #                 try:
@@ -230,7 +226,7 @@
 #                     train_losses_history = [x['train'] for x in history]
 #                     val_losses_history = [x['val'] for x in history]
 #                 except: pass
-        
+
 #         start_epoch += 1
 #         print(f"  -> Epoch {start_epoch}  best_val={best_val:.6f}\n")
 #     else:
@@ -285,7 +281,7 @@
 #         val_xyz  /= n_val
 #         val_ang  /= n_val
 
-#         # LƯU VÀO HISTORY ĐỂ VẼ ĐỒ THỊ (THÊM MỚI)
+#         # Lưu lịch sử để vẽ đồ thị
 #         train_losses_history.append(train_loss)
 #         val_losses_history.append(val_loss)
 
@@ -318,17 +314,20 @@
 #             print(f"\nEarly stopping (no improvement for {cfg.patience} epochs)")
 #             break
 
-#     # --- PHẦN VẼ ĐỒ THỊ (THÊM MỚI Ở CUỐI) ---
+#     # ── Vẽ đồ thị ──────────────────────────────────────────────────
 #     plt.figure(figsize=(10, 6))
 #     plt.plot(train_losses_history, label='Train Loss', color='blue')
 #     plt.plot(val_losses_history, label='Val Loss', color='red')
-#     plt.title('Loss History')
+#     plt.title('Training & Validation Loss History')
 #     plt.xlabel('Epochs')
 #     plt.ylabel('Loss')
 #     plt.legend()
-#     plt.grid(True)
+#     plt.grid(True, linestyle='--', alpha=0.6)
+    
 #     plot_path = os.path.join(cfg.ckpt_dir, "loss_plot.png")
 #     plt.savefig(plot_path)
+#     plt.close()
+
 #     print(f"\nDone! Best val loss = {best_val:.6f}")
 #     print(f"Checkpoints & Plot -> {cfg.ckpt_dir}")
 
@@ -336,7 +335,7 @@
 # if __name__ == "__main__":
 #     main()
 
-
+#split train, val, test
 import os, sys, json, pickle, argparse, time
 import numpy as np
 import pandas as pd
@@ -390,7 +389,7 @@ class PoseDataset(Dataset):
     def __getitem__(self, idx): return self.X[idx], self.Y[idx]
 
 
-def build_datasets(voltage_path, label_path, val_ratio, test_ratio,  # THÊM MỚI: test_ratio
+def build_datasets(voltage_path, label_path, val_ratio, test_ratio,
                    scaler_file, seed=42):
 
     def _read(path):
@@ -416,18 +415,16 @@ def build_datasets(voltage_path, label_path, val_ratio, test_ratio,  # THÊM M�
     voltages, labels = voltages[:N], labels[:N]
     print(f"  Total samples: {N:,}")
 
-    # THÊM MỚI: Split 70/20/10 thay vì 80/20
     rng      = np.random.default_rng(seed)
     idx      = rng.permutation(N)
-    n_test   = int(N * test_ratio)                                    # THÊM MỚI
+    n_test   = int(N * test_ratio)
     n_val    = int(N * val_ratio)
-    n_train  = N - n_val - n_test                                     # THÊM MỚI
+    n_train  = N - n_val - n_test
     train_idx = idx[:n_train]
     val_idx   = idx[n_train:n_train + n_val]
-    test_idx  = idx[n_train + n_val:]                                 # THÊM MỚI
-    print(f"  Train: {n_train:,}  |  Val: {n_val:,}  |  Test: {n_test:,}")  # THÊM MỚI
+    test_idx  = idx[n_train + n_val:]
+    print(f"  Train: {n_train:,}  |  Val: {n_val:,}  |  Test: {n_test:,}")
 
-    # Fit scaler CHI tren train
     if os.path.exists(scaler_file):
         with open(scaler_file, "rb") as f:
             sc = pickle.load(f)
@@ -441,15 +438,14 @@ def build_datasets(voltage_path, label_path, val_ratio, test_ratio,  # THÊM M�
             pickle.dump({"volt": volt_scaler, "label": label_scaler}, f)
         print(f"  Fitted & saved scalers -> {scaler_file}")
 
-    # THÊM MỚI: Luu test_idx vao split_info.json de cell test dung lai
     split_path = os.path.join(os.path.dirname(scaler_file), "split_info.json")
     if not os.path.exists(split_path):
         with open(split_path, "w") as f:
             json.dump({"train": train_idx.tolist(),
                        "val":   val_idx.tolist(),
-                       "test":  test_idx.tolist(),                                    # THÊM MỚI
+                       "test":  test_idx.tolist(),
                        "seed":  seed}, f)
-        print(f"  Split info saved -> {split_path}")                  # THÊM MỚI
+        print(f"  Split info saved -> {split_path}")
 
     v_scaled = volt_scaler.transform(voltages)
     l_scaled = label_scaler.transform(labels)
@@ -497,6 +493,56 @@ def append_log(log_file, entry):
     with open(log_file, "w") as f:
         json.dump(log, f, indent=2)
 
+
+# =============================================================================
+# INFERENCE TIME BENCHMARK
+# =============================================================================
+
+def measure_inference_time(model, device, n_samples=500, n_warmup=50):
+    """
+    Đo inference time trên một batch single-sample để phản ánh
+    latency thực tế khi deploy (1 sample tại một thời điểm).
+
+    Returns:
+        mean_ms   : thời gian trung bình (ms/sample)
+        std_ms    : độ lệch chuẩn (ms)
+        p95_ms    : percentile 95 (ms)
+    """
+    model.eval()
+    dummy = torch.randn(1, 1, 8, 8, device=device)
+
+    # Warmup — GPU cần vài lần chạy để JIT compile và pipeline ổn định
+    with torch.no_grad():
+        for _ in range(n_warmup):
+            _ = model(dummy)
+
+    # Đồng bộ GPU trước khi bắt đầu đo
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+
+    timings = []
+    with torch.no_grad():
+        for _ in range(n_samples):
+            if device.type == "cuda":
+                start = torch.cuda.Event(enable_timing=True)
+                end   = torch.cuda.Event(enable_timing=True)
+                start.record()
+                _ = model(dummy)
+                end.record()
+                torch.cuda.synchronize()
+                timings.append(start.elapsed_time(end))  # ms
+            else:
+                t0 = time.perf_counter()
+                _ = model(dummy)
+                timings.append((time.perf_counter() - t0) * 1000)  # ms
+
+    timings  = np.array(timings)
+    mean_ms  = timings.mean()
+    std_ms   = timings.std()
+    p95_ms   = np.percentile(timings, 95)
+    return mean_ms, std_ms, p95_ms
+
+
 # MAIN
 
 def main():
@@ -510,7 +556,6 @@ def main():
     print(f"  Device      : {device} ({gpu_name})")
     print(f"  Voltage     : {cfg.voltage}")
     print(f"  Label       : {cfg.label}")
-    # split 
     print(f"  Split       : Train {(1-cfg.val_ratio-cfg.test_ratio)*100:.0f}%"
           f" / Val {cfg.val_ratio*100:.0f}%"
           f" / Test {cfg.test_ratio*100:.0f}%")
@@ -533,7 +578,7 @@ def main():
     # ── Dataset ───────────────────────────────────────────────────────────────
     print("Loading dataset ...")
     train_ds, val_ds, n_train, n_val = build_datasets(
-        cfg.voltage, cfg.label, cfg.val_ratio, cfg.test_ratio,  # THÊM MỚI: cfg.test_ratio
+        cfg.voltage, cfg.label, cfg.val_ratio, cfg.test_ratio,
         scaler_file, seed=cfg.seed)
 
     pin = (device.type == "cuda")
@@ -557,7 +602,6 @@ def main():
     scheduler  = torch.optim.lr_scheduler.SequentialLR(
         optimizer, schedulers=[warmup_sch, cosine_sch], milestones=[cfg.warmup_epochs])
 
-    # torch.compile — chi dung tren Linux/Mac, bo qua tren Windows
     import platform
     if platform.system() != "Windows":
         try:
@@ -570,21 +614,20 @@ def main():
 
     # ── Resume & History Initialization ───────────────────────────────────────
     start_epoch, best_val = 1, float("inf")
-    train_losses_history = []  # THÊM MỚI ĐỂ VẼ ĐỒ THỊ
-    val_losses_history = []    # THÊM MỚI ĐỂ VẼ ĐỒ THỊ
+    train_losses_history = []
+    val_losses_history   = []
 
     if os.path.exists(ckpt_latest):
         print(f"Resuming from {ckpt_latest} ...")
         start_epoch, best_val = load_checkpoint(
             ckpt_latest, model, optimizer, scheduler, device)
         
-        # Load lại history từ log để vẽ tiếp đồ thị nếu resume
         if os.path.exists(log_file):
             with open(log_file, "r") as f:
                 try:
                     history = json.load(f)
                     train_losses_history = [x['train'] for x in history]
-                    val_losses_history = [x['val'] for x in history]
+                    val_losses_history   = [x['val']   for x in history]
                 except: pass
         
         start_epoch += 1
@@ -641,7 +684,6 @@ def main():
         val_xyz  /= n_val
         val_ang  /= n_val
 
-        # LƯU VÀO HISTORY ĐỂ VẼ ĐỒ THỊ
         train_losses_history.append(train_loss)
         val_losses_history.append(val_loss)
 
@@ -677,7 +719,7 @@ def main():
     # --- VẼ ĐỒ THỊ ---
     plt.figure(figsize=(10, 6))
     plt.plot(train_losses_history, label='Train Loss', color='blue', linewidth=1.5)
-    plt.plot(val_losses_history, label='Val Loss', color='red', linewidth=1.5)
+    plt.plot(val_losses_history,   label='Val Loss',   color='red',  linewidth=1.5)
     plt.title('Training and Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
@@ -686,7 +728,49 @@ def main():
     
     plot_path = os.path.join(cfg.ckpt_dir, "loss_plot.png")
     plt.savefig(plot_path)
-    plt.close() 
+    plt.close()
+
+    # ── INFERENCE TIME BENCHMARK ──────────────────────────────────────────────
+    print("\n" + "=" * 65)
+    print("  Inference Time Benchmark  (single sample, best checkpoint)")
+    print("=" * 65)
+
+    # Load lại best checkpoint để đo inference time đúng model tốt nhất
+    if os.path.exists(ckpt_best):
+        best_ckpt = torch.load(ckpt_best, map_location=device, weights_only=False)
+        raw_state = best_ckpt["model"]
+        is_compiled = hasattr(model, "_orig_mod")
+        if is_compiled:
+            state = (raw_state if any(k.startswith("_orig_mod.") for k in raw_state)
+                     else {"_orig_mod." + k: v for k, v in raw_state.items()})
+        else:
+            state = {k.replace("_orig_mod.", ""): v for k, v in raw_state.items()}
+        model.load_state_dict(state)
+        print(f"  Loaded best checkpoint from {ckpt_best}")
+
+    mean_ms, std_ms, p95_ms = measure_inference_time(
+        model, device, n_samples=500, n_warmup=50)
+
+    print(f"  Mean latency : {mean_ms:.3f} ms/sample")
+    print(f"  Std          : {std_ms:.3f} ms")
+    print(f"  P95 latency  : {p95_ms:.3f} ms/sample")
+    print(f"  Throughput   : ~{1000/mean_ms:.0f} samples/sec")
+    print("=" * 65)
+
+    # Lưu kết quả inference time vào file json
+    infer_result = {
+        "device":          str(device),
+        "mean_ms":         round(mean_ms, 4),
+        "std_ms":          round(std_ms,  4),
+        "p95_ms":          round(p95_ms,  4),
+        "throughput_sps":  round(1000 / mean_ms, 1),
+        "n_warmup":        50,
+        "n_samples":       500,
+    }
+    infer_path = os.path.join(cfg.ckpt_dir, "inference_time.json")
+    with open(infer_path, "w") as f:
+        json.dump(infer_result, f, indent=2)
+    print(f"  Inference time saved -> {infer_path}")
 
     print(f"\nDone! Best val loss = {best_val:.6f}")
     print(f"Checkpoints & Plot -> {cfg.ckpt_dir}")
