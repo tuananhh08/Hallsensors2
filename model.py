@@ -79,6 +79,3 @@ class Model(nn.Module):
 
         return torch.cat([xyz, ang], dim=1)  
     
-# my_model = Model() 
-# total_params = sum(p.numel() for p in my_model.parameters())
-# print(f"Total Parameters: {total_params:,}")

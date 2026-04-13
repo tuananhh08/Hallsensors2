@@ -5,7 +5,7 @@
 # import torch.nn as nn
 # from torch.utils.data import Dataset, DataLoader
 # from sklearn.preprocessing import MinMaxScaler, StandardScaler
-# import matplotlib.pyplot as plt  # THÊM MỚI
+# import matplotlib.pyplot as plt
 
 # sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # from model import Model
@@ -18,22 +18,22 @@
 
 # def get_config():
 #     p = argparse.ArgumentParser()
-#     p.add_argument("--voltage",      type=str,   default="grid_calib_data.csv")
-#     p.add_argument("--label",        type=str,   default="Grid_points_coordinates.csv")
-#     p.add_argument("--ckpt_dir",     type=str,   default="./ckpt")
-#     p.add_argument("--val_ratio",    type=float, default=0.2,
-#                    help="Ti le validation (default=0.2 tuc 80/20)")
-#     p.add_argument("--batch_size",   type=int,   default=64)
-#     p.add_argument("--num_epochs",   type=int,   default=200)
-#     p.add_argument("--lr",           type=float, default=0.0097)
-#     p.add_argument("--weight_decay", type=float, default=0.0032)
-#     p.add_argument("--ang_weight",   type=float, default=1.0)
-#     p.add_argument("--delta_xyz",    type=float, default=0.055)
-#     p.add_argument("--delta_ang",    type=float, default=0.16)
-#     p.add_argument("--warmup_epochs",type=int,   default=5)
-#     p.add_argument("--save_every",   type=int,   default=5)
-#     p.add_argument("--patience",     type=int,   default=40)
-#     p.add_argument("--seed",         type=int,   default=42)
+#     p.add_argument("--voltage",       type=str,   default="grid_calib_data.csv")
+#     p.add_argument("--label",         type=str,   default="Grid_points_coordinates.csv")
+#     p.add_argument("--ckpt_dir",      type=str,   default="./ckpt2")
+#     p.add_argument("--val_ratio",     type=float, default=0.2,
+#                    help="Ti le validation (default=0.2)")
+#     p.add_argument("--batch_size",    type=int,   default=64)
+#     p.add_argument("--num_epochs",    type=int,   default=200)
+#     p.add_argument("--lr",            type=float, default=0.0098)
+#     p.add_argument("--weight_decay",  type=float, default=0.0032)
+#     p.add_argument("--ang_weight",    type=float, default=1.0)
+#     p.add_argument("--delta_xyz",     type=float, default=0.055)
+#     p.add_argument("--delta_ang",     type=float, default=0.16)
+#     p.add_argument("--warmup_epochs", type=int,   default=5)
+#     p.add_argument("--save_every",    type=int,   default=5)
+#     p.add_argument("--patience",      type=int,   default=40)
+#     p.add_argument("--seed",          type=int,   default=42)
 #     return p.parse_args()
 
 
@@ -54,7 +54,7 @@
 #     def _read(path):
 #         df = pd.read_csv(path, header=None)
 #         try:
-#             df.iloc[0].astype(float)   # dong dau la so -> khong co header
+#             df.iloc[0].astype(float)
 #             has_header = False
 #         except (ValueError, TypeError):
 #             has_header = True
@@ -74,15 +74,17 @@
 #     voltages, labels = voltages[:N], labels[:N]
 #     print(f"  Total samples: {N:,}")
 
-#     # Split 80/20 theo seed
-#     rng     = np.random.default_rng(seed)
-#     idx     = rng.permutation(N)
-#     n_val   = int(N * val_ratio)
-#     n_train = N - n_val
-#     train_idx, val_idx = idx[:n_train], idx[n_train:]
+#     # Split train / val — KHÔNG có test (test dùng file riêng biệt)
+#     rng      = np.random.default_rng(seed)
+#     idx      = rng.permutation(N)
+#     n_val    = int(N * val_ratio)
+#     n_train  = N - n_val
+#     train_idx = idx[:n_train]
+#     val_idx   = idx[n_train:]
 #     print(f"  Train: {n_train:,}  |  Val: {n_val:,}")
+#     print(f"  NOTE: Test set is a SEPARATE file — no data leakage risk.")
 
-#     # Fit scaler CHI tren train
+#     # Fit scaler CHỈ trên train
 #     if os.path.exists(scaler_file):
 #         with open(scaler_file, "rb") as f:
 #             sc = pickle.load(f)
@@ -96,6 +98,16 @@
 #             pickle.dump({"volt": volt_scaler, "label": label_scaler}, f)
 #         print(f"  Fitted & saved scalers -> {scaler_file}")
 
+#     # Lưu split info (chỉ train/val)
+#     split_path = os.path.join(os.path.dirname(scaler_file), "split_info2.json")
+#     if not os.path.exists(split_path):
+#         with open(split_path, "w") as f:
+#             json.dump({"train": train_idx.tolist(),
+#                        "val":   val_idx.tolist(),
+#                        "seed":  seed,
+#                        "note":  "No test split. Test on separate held-out file."}, f)
+#         print(f"  Split info saved -> {split_path}")
+
 #     v_scaled = volt_scaler.transform(voltages)
 #     l_scaled = label_scaler.transform(labels)
 
@@ -104,7 +116,9 @@
 #     return train_ds, val_ds, n_train, n_val
 
 
+# # =============================================================================
 # # CHECKPOINT HELPERS
+# # =============================================================================
 
 # def save_checkpoint(path, epoch, model, optimizer, scheduler, val_loss, best_val):
 #     torch.save({
@@ -142,20 +156,55 @@
 #     with open(log_file, "w") as f:
 #         json.dump(log, f, indent=2)
 
+
+# # =============================================================================
+# # INFERENCE TIME BENCHMARK
+# # =============================================================================
+
+# def measure_inference_time(model, device, n_samples=500, n_warmup=50):
+#     model.eval()
+#     dummy = torch.randn(1, 1, 8, 8, device=device)
+#     with torch.no_grad():
+#         for _ in range(n_warmup):
+#             _ = model(dummy)
+#     if device.type == "cuda":
+#         torch.cuda.synchronize()
+#     timings = []
+#     with torch.no_grad():
+#         for _ in range(n_samples):
+#             if device.type == "cuda":
+#                 start = torch.cuda.Event(enable_timing=True)
+#                 end   = torch.cuda.Event(enable_timing=True)
+#                 start.record()
+#                 _ = model(dummy)
+#                 end.record()
+#                 torch.cuda.synchronize()
+#                 timings.append(start.elapsed_time(end))
+#             else:
+#                 t0 = time.perf_counter()
+#                 _ = model(dummy)
+#                 timings.append((time.perf_counter() - t0) * 1000)
+#     timings = np.array(timings)
+#     return timings.mean(), timings.std(), np.percentile(timings, 95)
+
+
+# # =============================================================================
 # # MAIN
+# # =============================================================================
 
 # def main():
 #     cfg    = get_config()
 #     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #     print("\n" + "=" * 65)
-#     print("  Model Training")
+#     print("  Model Training  (train2 — separate test file)")
 #     print("=" * 65)
 #     gpu_name = torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU"
 #     print(f"  Device      : {device} ({gpu_name})")
 #     print(f"  Voltage     : {cfg.voltage}")
 #     print(f"  Label       : {cfg.label}")
-#     print(f"  Val ratio   : {cfg.val_ratio*100:.0f}%")
+#     print(f"  Split       : Train {(1-cfg.val_ratio)*100:.0f}% / Val {cfg.val_ratio*100:.0f}%")
+#     print(f"  Test        : separate file (run test2.py)")
 #     print(f"  Epochs      : {cfg.num_epochs}  |  Batch: {cfg.batch_size}  |  LR: {cfg.lr}")
 #     print(f"  Loss        : HuberPoseLoss  ang_weight={cfg.ang_weight}"
 #           f"  delta_xyz={cfg.delta_xyz}  delta_ang={cfg.delta_ang}")
@@ -179,7 +228,7 @@
 
 #     pin = (device.type == "cuda")
 #     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size,
-#                               shuffle=True, pin_memory=pin, drop_last=True)
+#                               shuffle=True,  pin_memory=pin, drop_last=True)
 #     val_loader   = DataLoader(val_ds,   batch_size=cfg.batch_size,
 #                               shuffle=False, pin_memory=pin)
 
@@ -208,25 +257,22 @@
 #     else:
 #         print("torch.compile disabled (Windows)")
 
-#     # ── Resume & History Initialization ───────────────────────────────────────
-#     start_epoch, best_val = 1, float("inf")
-#     train_losses_history = []  
-#     val_losses_history = []    
+#     # ── Resume & History ──────────────────────────────────────────────────────
+#     start_epoch, best_val   = 1, float("inf")
+#     train_losses_history    = []
+#     val_losses_history      = []
 
 #     if os.path.exists(ckpt_latest):
 #         print(f"Resuming from {ckpt_latest} ...")
 #         start_epoch, best_val = load_checkpoint(
 #             ckpt_latest, model, optimizer, scheduler, device)
-        
-#         # Load lại lịch sử từ log nếu có để vẽ đồ thị liên tục
 #         if os.path.exists(log_file):
-#             with open(log_file, "r") as f:
+#             with open(log_file) as f:
 #                 try:
 #                     history = json.load(f)
 #                     train_losses_history = [x['train'] for x in history]
-#                     val_losses_history = [x['val'] for x in history]
+#                     val_losses_history   = [x['val']   for x in history]
 #                 except: pass
-
 #         start_epoch += 1
 #         print(f"  -> Epoch {start_epoch}  best_val={best_val:.6f}\n")
 #     else:
@@ -281,7 +327,6 @@
 #         val_xyz  /= n_val
 #         val_ang  /= n_val
 
-#         # Lưu lịch sử để vẽ đồ thị
 #         train_losses_history.append(train_loss)
 #         val_losses_history.append(val_loss)
 
@@ -314,19 +359,55 @@
 #             print(f"\nEarly stopping (no improvement for {cfg.patience} epochs)")
 #             break
 
-#     # ── Vẽ đồ thị ──────────────────────────────────────────────────
+#     # ── Loss plot ─────────────────────────────────────────────────────────────
 #     plt.figure(figsize=(10, 6))
-#     plt.plot(train_losses_history, label='Train Loss', color='blue')
-#     plt.plot(val_losses_history, label='Val Loss', color='red')
-#     plt.title('Training & Validation Loss History')
+#     plt.plot(train_losses_history, label='Train Loss', color='blue', linewidth=1.5)
+#     plt.plot(val_losses_history,   label='Val Loss',   color='red',  linewidth=1.5)
+#     plt.title('Training and Validation Loss')
 #     plt.xlabel('Epochs')
 #     plt.ylabel('Loss')
 #     plt.legend()
-#     plt.grid(True, linestyle='--', alpha=0.6)
-    
+#     plt.grid(True, linestyle='--', alpha=0.7)
 #     plot_path = os.path.join(cfg.ckpt_dir, "loss_plot.png")
 #     plt.savefig(plot_path)
 #     plt.close()
+
+#     # ── Inference time benchmark ──────────────────────────────────────────────
+#     print("\n" + "=" * 65)
+#     print("  Inference Time Benchmark  (single sample, best checkpoint)")
+#     print("=" * 65)
+
+#     if os.path.exists(ckpt_best):
+#         best_ckpt = torch.load(ckpt_best, map_location=device, weights_only=False)
+#         raw_state = best_ckpt["model"]
+#         is_compiled = hasattr(model, "_orig_mod")
+#         if is_compiled:
+#             state = (raw_state if any(k.startswith("_orig_mod.") for k in raw_state)
+#                      else {"_orig_mod." + k: v for k, v in raw_state.items()})
+#         else:
+#             state = {k.replace("_orig_mod.", ""): v for k, v in raw_state.items()}
+#         model.load_state_dict(state)
+#         print(f"  Loaded best checkpoint from {ckpt_best}")
+
+#     mean_ms, std_ms, p95_ms = measure_inference_time(
+#         model, device, n_samples=500, n_warmup=50)
+
+#     print(f"  Mean latency : {mean_ms:.3f} ms/sample")
+#     print(f"  Std          : {std_ms:.3f} ms")
+#     print(f"  P95 latency  : {p95_ms:.3f} ms/sample")
+#     print(f"  Throughput   : ~{1000/mean_ms:.0f} samples/sec")
+#     print("=" * 65)
+
+#     infer_path = os.path.join(cfg.ckpt_dir, "inference_time.json")
+#     with open(infer_path, "w") as f:
+#         json.dump({
+#             "device": str(device),
+#             "mean_ms": round(mean_ms, 4), "std_ms": round(std_ms, 4),
+#             "p95_ms":  round(p95_ms,  4),
+#             "throughput_sps": round(1000 / mean_ms, 1),
+#             "n_warmup": 50, "n_samples": 500,
+#         }, f, indent=2)
+#     print(f"  Inference time saved -> {infer_path}")
 
 #     print(f"\nDone! Best val loss = {best_val:.6f}")
 #     print(f"Checkpoints & Plot -> {cfg.ckpt_dir}")
