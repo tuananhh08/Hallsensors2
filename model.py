@@ -1,10 +1,7 @@
-# from xml.parsers.expat import model
-
 import torch
 import torch.nn as nn
 from cbam import CBAM, ChannelAttention
 from convnext_block import ConvNeXtBlock
-
 
 class Model(nn.Module):
     def __init__(self, out_dim: int = 5, drop_path_rate: float = 0.055):
@@ -77,5 +74,4 @@ class Model(nn.Module):
         xyz = self.head_xyz(x)    
         ang = self.head_ang(x)     
 
-        return torch.cat([xyz, ang], dim=1)  
-    
+        return torch.cat([xyz, ang], dim=1)
